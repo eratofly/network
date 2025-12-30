@@ -19,13 +19,13 @@ void RdtReceiver::Log(const std::string& msg) {
 
 void RdtReceiver::SendAck(uint32_t ackNum, sockaddr_in& dest) {
     Packet ack;
+    std::memset(&ack, 0, sizeof(ack));
     ack.flags = FLAG_ACK;
     ack.ackNum = ackNum;
     ack.dataSize = 0;
+    ack.checksum = calculateChecksum(ack);
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    sendto(sock, &ack, sizeof(ack), 0, (struct sockaddr*)&dest, sizeof(dest));
-    close(sock);
+    m_socket.SendTo(ack, dest);
 }
 
 void RdtReceiver::ReceiveFile(const std::string& outputFilename) {
@@ -43,9 +43,17 @@ void RdtReceiver::ReceiveFile(const std::string& outputFilename) {
         int bytes = m_socket.Recv(pkt, &senderAddr);
 
         if (bytes > 0) {
+            uint16_t calc = calculateChecksum(pkt);
+            if (calc != pkt.checksum) {
+                Log("Checksum mismatch! Dropping packet SEQ: " + std::to_string(pkt.seqNum));
+                continue;
+            }
+
             if (pkt.flags & FLAG_FIN) {
-                Log("Received FIN. Sending ACK and closing.");
-                for(int i=0; i<3; i++) SendAck(pkt.seqNum, senderAddr);
+                Log("Received FIN. Sending ACKs and closing.");
+                for(int i=0; i<5; i++) {
+                    SendAck(pkt.seqNum, senderAddr);
+                }
                 break;
             }
 
@@ -65,7 +73,7 @@ void RdtReceiver::ReceiveFile(const std::string& outputFilename) {
                 if (m_expectedSeqNum > 0) {
                     SendAck(m_expectedSeqNum - 1, senderAddr);
                 } else {
-
+                    Log("Waiting for first packet (Seq 0). Ignoring packet " + std::to_string(pkt.seqNum));
                 }
             }
         }

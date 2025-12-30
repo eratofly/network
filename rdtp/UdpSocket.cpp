@@ -23,7 +23,11 @@ bool UdpSocket::Bind(int port) {
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    return bind(m_socketFd, (struct sockaddr*)&addr, sizeof(addr)) >= 0;
+    if (bind(m_socketFd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("bind failed");
+        return false;
+    }
+    return true;
 }
 
 void UdpSocket::SetDestination(const std::string& ip, int port) {
@@ -40,15 +44,21 @@ bool UdpSocket::SendUnreliable(const Packet& pkt, double lossProb, int delayMs) 
     }
 
     if (delayMs > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(rand() % delayMs));
+        int actualDelay = rand() % delayMs;
+        if (actualDelay > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(actualDelay));
     }
 
     return Send(pkt);
 }
 
 bool UdpSocket::Send(const Packet& pkt) {
+    return SendTo(pkt, m_destAddr);
+}
+
+bool UdpSocket::SendTo(const Packet& pkt, const sockaddr_in& target) {
     int sent = sendto(m_socketFd, &pkt, sizeof(pkt), 0,
-                      (struct sockaddr*)&m_destAddr, sizeof(m_destAddr));
+                      (struct sockaddr*)&target, sizeof(target));
     return sent >= 0;
 }
 

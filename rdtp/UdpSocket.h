@@ -13,8 +13,10 @@ public:
 
     bool Bind(int port);
     void SetDestination(const std::string& ip, int port);
+
     bool SendUnreliable(const Packet& pkt, double lossProb, int delayMs);
     bool Send(const Packet& pkt);
+    bool SendTo(const Packet& pkt, const sockaddr_in& target);
     int Recv(Packet& pkt, sockaddr_in* sender = nullptr);
     void SetRecvTimeout(int ms);
 

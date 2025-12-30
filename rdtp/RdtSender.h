@@ -15,6 +15,8 @@ private:
     void PreparePackets(const std::string& filename);
     void Log(const std::string& msg);
 
+    void PrintProgress(float progress);
+
     UdpSocket m_socket;
     std::vector<Packet> m_packets;
     bool m_debug;
@@ -23,6 +25,7 @@ private:
     int m_base = 0;
     int m_nextSeqNum = 0;
     int m_timeoutMs = 500;
+    const int m_maxRetries = 10;
 
     double m_lossRate = 0.2;
     int m_maxDelay = 50;
