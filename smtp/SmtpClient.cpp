@@ -1,146 +1,131 @@
 #include "SmtpClient.h"
-#include <arpa/inet.h>
-#include <cstring>
 #include <iostream>
-#include <sstream>
-#include <stdexcept>
+#include <cstring>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include <unistd.h>
+#include <netdb.h>
 
-SmtpClient::SmtpClient(const std::string &serverIp, const int port) :
-    m_socket(-1), m_serverIp(serverIp), m_port(port), m_isConnected(false)
-{
+using namespace std;
+
+SmtpClient::SmtpClient(const string& server, int m_port)
+    : m_serverHost(server), m_port(m_port), m_clientSocket(-1), m_isConnected(false) {}
+
+SmtpClient::~SmtpClient() {
+    if (m_isConnected && m_clientSocket != -1) {
+        close(m_clientSocket);
+    }
 }
 
-SmtpClient::~SmtpClient() { Disconnect(); }
+string SmtpClient::GetIpByHostname(const string& hostname) {
+    struct hostent* he;
+    struct in_addr** addrList;
+    he = gethostbyname(hostname.c_str());
+    if (he == NULL) return "";
+    addrList = (struct in_addr**)he->h_addr_list;
+    return inet_ntoa(*addrList[0]);
+}
 
-void SmtpClient::Connect()
-{
-    if (m_isConnected)
-        return;
+string SmtpClient::ReadLine() {
+    string line = "";
+    char c;
+    while (read(m_clientSocket, &c, 1) > 0) {
+        line += c;
+        if (line.length() >= 2 && line.substr(line.length() - 2) == "\r\n") {
+            break;
+        }
+    }
+    return line;
+}
 
-    m_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_socket < 0)
-    {
-        throw std::runtime_error("Error creating socket");
+void SmtpClient::SendCommand(const string& command) {
+    cout << "C: " << command;
+    write(m_clientSocket, command.c_str(), command.length());
+}
+
+bool SmtpClient::ExpectResponse(int expectedCode) {
+    string fullResponse = "";
+    string lastLine = "";
+
+    while (true) {
+        lastLine = ReadLine();
+        fullResponse += lastLine;
+        if (lastLine.length() < 4) break;
+        if (lastLine[3] == ' ') break;
     }
 
-    sockaddr_in serverAddr = {};
+    cout << "S: " << fullResponse;
+
+    if (fullResponse.empty()) return false;
+
+    try {
+        int actualCode = stoi(fullResponse.substr(0, 3));
+        return actualCode == expectedCode;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool SmtpClient::ConnectToServer() {
+    m_clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (m_clientSocket < 0) {
+        cerr << "Error creating socket" << endl;
+        return false;
+    }
+
+    string serverIp = GetIpByHostname(m_serverHost);
+    if (serverIp.empty()) {
+        cerr << "Could not resolve hostname" << endl;
+        return false;
+    }
+
+    struct sockaddr_in serverAddr;
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(m_port);
+    inet_pton(AF_INET, serverIp.c_str(), &serverAddr.sin_addr);
 
-    if (inet_pton(AF_INET, m_serverIp.c_str(), &serverAddr.sin_addr) <= 0)
-    {
-        close(m_socket);
-        throw std::runtime_error("Invalid IP address");
+    if (connect(m_clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        cerr << "Connection failed" << endl;
+        return false;
     }
 
-    std::cout << "Connection to " << m_serverIp << ":" << m_port << "..." << std::endl;
-
-    if (connect(m_socket, (sockaddr *) &serverAddr, sizeof(serverAddr)) < 0)
-    {
-        close(m_socket);
-        throw std::runtime_error("No such connection");
+    if (!ExpectResponse(220)) {
+        close(m_clientSocket);
+        return false;
     }
 
     m_isConnected = true;
-
-    std::string response;
-    ReadResponse(response);
-    CheckResponse(response, 220);
+    return true;
 }
 
-void SmtpClient::Disconnect()
-{
-    if (m_isConnected && m_socket >= 0)
-    {
-        close(m_socket);
-        m_socket = -1;
-        m_isConnected = false;
-        std::cout << "Connection is end" << std::endl;
-    }
-}
-
-void SmtpClient::ReadResponse(std::string &responseBuffer)
-{
-    char buffer[4096];
-    std::memset(buffer, 0, sizeof(buffer));
-
-    ssize_t bytesRead = read(m_socket, buffer, sizeof(buffer) - 1);
-    if (bytesRead < 0)
-    {
-        throw std::runtime_error("Error reading from socket");
+bool SmtpClient::SendEmail(const string& sender, const string& recipient, const string& subject, const string& body) {
+    if (!m_isConnected) {
+        cerr << "Not connected to server" << endl;
+        return false;
     }
 
-    responseBuffer = std::string(buffer);
-    std::cout << "S: " << responseBuffer;
-    if (responseBuffer.back() != '\n')
-        std::cout << std::endl;
-}
+    SendCommand("EHLO myclient.com\r\n");
+    if (!ExpectResponse(250)) return false;
 
-void SmtpClient::SendRaw(const std::string &data)
-{
-    std::cout << "C: " << data;
-    if (write(m_socket, data.c_str(), data.length()) < 0)
-    {
-        throw std::runtime_error("Error writing to socket");
-    }
-}
+    SendCommand("MAIL FROM: <" + sender + ">\r\n");
+    if (!ExpectResponse(250)) return false;
 
-void SmtpClient::CheckResponse(const std::string &response, int expectedCode)
-{
-    std::string codeStr = std::to_string(expectedCode);
-    if (response.substr(0, 3) != codeStr)
-    {
-        std::stringstream ss;
-        ss << "Error SMTP. Waiting code " << expectedCode << ", receive response: " << response;
-        throw std::runtime_error(ss.str());
-    }
-}
+    SendCommand("RCPT TO: <" + recipient + ">\r\n");
+    if (!ExpectResponse(250)) return false;
 
-void SmtpClient::SendCommand(const std::string &command, const std::string &argument, int expectedCode)
-{
-    std::stringstream ss;
-    ss << command;
-    if (!argument.empty())
-    {
-        ss << " " << argument;
-    }
-    ss << "\r\n";
+    SendCommand("DATA\r\n");
+    if (!ExpectResponse(354)) return false;
 
-    SendRaw(ss.str());
+    string fullMessage = "Subject: " + subject + "\r\n\r\n" + body + "\r\n.\r\n";
+    SendCommand(fullMessage);
+    if (!ExpectResponse(250)) return false;
 
-    std::string response;
-    ReadResponse(response);
-    CheckResponse(response, expectedCode);
-}
+    SendCommand("QUIT\r\n");
+    ExpectResponse(221);
 
-void SmtpClient::SendMail(const std::string &sender, const std::string &recipient, const std::string &subject,
-                          const std::string &body)
-{
-    SendCommand("HELO", "smtp", 250);
+    close(m_clientSocket);
+    m_isConnected = false;
+    m_clientSocket = -1;
 
-    std::string fromArg = "<" + sender + ">";
-    SendCommand("MAIL FROM:", fromArg, 250);
-
-    std::string toArg = "<" + recipient + ">";
-    SendCommand("RCPT TO:", toArg, 250);
-
-    SendCommand("DATA", "", 354);
-
-    std::stringstream emailContent;
-    emailContent << "From: " << sender << "\r\n";
-    emailContent << "To: " << recipient << "\r\n";
-    emailContent << "Subject: " << subject << "\r\n";
-    emailContent << "\r\n";
-    emailContent << body << "\r\n";
-    emailContent << ".\r\n";
-
-    SendRaw(emailContent.str());
-
-    std::string response;
-    ReadResponse(response);
-    CheckResponse(response, 250);
-
-    SendCommand("QUIT", "", 221);
+    return true;
 }

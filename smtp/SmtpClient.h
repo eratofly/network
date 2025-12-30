@@ -5,23 +5,25 @@
 
 class SmtpClient {
 public:
-    SmtpClient(const std::string& serverIp, int port);
+    SmtpClient(const std::string& server, int m_port);
     ~SmtpClient();
 
-    void Connect();
-    void SendCommand(const std::string& command, const std::string& argument, int expectedCode);
-    void SendMail(const std::string& sender, const std::string& recipient, const std::string& subject, const std::string& body);
-    void Disconnect();
+    bool ConnectToServer();
+
+    bool SendEmail(const std::string& sender,
+                   const std::string& recipient,
+                   const std::string& subject,
+                   const std::string& body);
 
 private:
-    int m_socket;
-    std::string m_serverIp;
+    std::string m_serverHost;
     int m_port;
+    int m_clientSocket;
     bool m_isConnected;
-
-    void ReadResponse(std::string& responseBuffer);
-    void SendRaw(const std::string& data);
-    void CheckResponse(const std::string& response, int expectedCode);
+    std::string GetIpByHostname(const std::string& hostname);
+    std::string ReadLine();
+    void SendCommand(const std::string& command);
+    bool ExpectResponse(int expectedCode);
 };
 
 #endif // SMTP_CLIENT_HPP

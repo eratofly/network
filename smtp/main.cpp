@@ -1,32 +1,32 @@
-#include "SmtpClient.h"
 #include <iostream>
-#include <stdexcept>
+#include "SmtpClient.h"
 
-const std::string SERVER_IP = "127.0.0.1";
-constexpr int SERVER_PORT = 2525;
-const std::string SENDER_EMAIL = "alice@mail.test";
-const std::string RECIPIENT_EMAIL = "bob@mail.test";
+using namespace std;
 
 int main() {
-    std::cout << "Start" << std::endl;
+    string smtpServer = "127.0.0.1";
+    int m_port = 1025;
 
-    try {
-        SmtpClient client(SERVER_IP, SERVER_PORT);
+    string sender = "alice@mail.com";
+    string recipient = "bob@mail.com";
+    string subject = "Congratulations!";
+    string body = "Hello!\nHappy New Year!";
 
-        client.Connect();
+    SmtpClient client(smtpServer, m_port);
 
-        client.SendMail(
-            SENDER_EMAIL,
-            RECIPIENT_EMAIL,
-            "Test sending email",
-            "Hello everybody! Happy New Yaer!!!"
-        );
+    if (client.ConnectToServer()) {
+        cout << "Connected successfully." << endl;
 
-    } catch (const std::exception& e) {
-        std::cerr << "[CRITICAL ERROR]: " << e.what() << std::endl;
+        if (client.SendEmail(sender, recipient, subject, body)) {
+            cout << "Email sent successfully!" << endl;
+        } else {
+            cerr << "Failed to send email." << endl;
+            return 1;
+        }
+    } else {
+        cerr << "Failed to connect to server." << endl;
         return 1;
     }
 
-    std::cout << "End" << std::endl;
     return 0;
 }
